@@ -1,0 +1,40 @@
+departement,poste,categorie,montant_octobre
+RH,Salaires fixes — tech & produit,Salaires & charges sociales,442
+RH,Salaires fixes — sales & marketing,Salaires & charges sociales,202
+RH,Salaires fixes — G&A,Salaires & charges sociales,105
+RH,Charges patronales,Salaires & charges sociales,152
+RH,Primes variables — sales,Salaires & charges sociales,31
+RH,Frais de recrutement (cabinets),Recrutement & formation,0
+RH,Formations & certifications,Recrutement & formation,3
+RH,Tickets restaurant & avantages,Autres charges RH,15
+RH,Médecine du travail & mutuelle,Autres charges RH,8
+RH,"Licences outils RH (ATS, HRIS)",Autres charges RH,7
+Tech,AWS / Azure — prod,Infrastructure & cloud,79
+Tech,AWS / Azure — dev & staging,Infrastructure & cloud,22
+Tech,CDN & sécurité infra,Infrastructure & cloud,9
+Tech,GitHub / GitLab,Licences & SaaS Tech,4
+Tech,Datadog / monitoring,Licences & SaaS Tech,15
+Tech,Licences data / enrichissement,Licences & SaaS Tech,26
+Tech,Outils IA & LLM (API),Licences & SaaS Tech,22
+Tech,Développeurs freelance,Prestataires & sous-traitance,40
+Tech,Pentest & audits sécu,Prestataires & sous-traitance,0
+S&M,Événements & salons,Marketing,12
+S&M,Digital marketing & SEO,Marketing,19
+S&M,Contenu & production créa,Marketing,11
+S&M,Relations presse & RP,Marketing,5
+S&M,Commissions & incentives,Sales,38
+S&M,Déplacements commerciaux,Sales,14
+"S&M","CRM & sales tools (SF, Outreach…)",Sales,14
+S&M,SDR — data enrichment tools,Sales,5
+S&M,CS tools & plateformes,Customer Success,7
+S&M,Formation clients & onboarding,Customer Success,6
+G&A,Loyer & charges locatives,Frais généraux,38
+G&A,Téléphonie & internet,Frais généraux,4
+G&A,Fournitures & petits équipements,Frais généraux,3
+G&A,Charges locatives refacturées,Frais généraux,38
+G&A,Honoraires avocats,Juridique & finance,0
+G&A,Audit & commissariat aux comptes,Juridique & finance,0
+G&A,Banque & frais financiers,Juridique & finance,3
+G&A,Assurances,Juridique & finance,6
+G&A,Licences Microsoft 365,IT G&A,5
+"G&A","Licences Slack, Notion, Figma…",IT G&A,4
