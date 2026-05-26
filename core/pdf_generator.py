@@ -98,9 +98,6 @@ def generate_pdf(
     story.append(Paragraph("Synthèse charges — " + CURRENT_MONTH_LABEL, style_section))
 
     prev = SEPT_2024_TOTALS
-    # YTD = Sep YTD (on simule : sum Jan-Sep = prev["TOTAL"] * 9 / 12 fictif)
-    # Pour la démo, on calcule YTD Jan-Oct = Sep total + Oct total
-    ytd_base = {"RH": 965 * 9, "Tech": 217 * 9, "S&M": 153 * 9, "G&A": 107 * 9}
 
     headers = ["Département", "Oct 2024", "Sep 2024", "Var. M/M", "YTD Jan–Oct"]
     table_data = [headers]
@@ -108,9 +105,9 @@ def generate_pdf(
     depts = ["RH", "Tech", "S&M", "G&A"]
     for dept in depts:
         curr = synthese_data.get(dept, 0)
-        prv = prev.get(dept, 0)
-        ytd = ytd_base.get(dept, 0) + curr
-        var = _var_str(curr, prv)
+        prv  = prev.get(dept, 0)
+        ytd  = synthese_data.get(f"ytd_{dept}", 0)
+        var  = _var_str(curr, prv)
         table_data.append([
             dept,
             f"{curr:,.0f} k€",
@@ -121,8 +118,8 @@ def generate_pdf(
 
     # Ligne TOTAL
     curr_tot = synthese_data.get("TOTAL", 0)
-    prv_tot = prev.get("TOTAL", 0)
-    ytd_tot = sum(ytd_base.values()) + curr_tot
+    prv_tot  = prev.get("TOTAL", 0)
+    ytd_tot  = synthese_data.get("ytd_TOTAL", 0)
     table_data.append([
         "TOTAL",
         f"{curr_tot:,.0f} k€",

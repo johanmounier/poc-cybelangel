@@ -1,4 +1,5 @@
 import shutil
+from copy import copy as _copy_obj
 
 import openpyxl
 
@@ -41,6 +42,22 @@ def _safe_read(ws, row: int, col: int):
         return None
 
 
+def _copy_col_style(ws, src_col: int, dst_col: int, row_start: int, row_end: int) -> None:
+    """Copie fill/font/border/alignment de src_col vers dst_col sur les lignes données."""
+    for row in range(row_start, row_end + 1):
+        src = ws.cell(row, src_col)
+        dst = ws.cell(row, dst_col)
+        if src.__class__.__name__ == "MergedCell" or dst.__class__.__name__ == "MergedCell":
+            continue
+        try:
+            dst.fill      = _copy_obj(src.fill)
+            dst.font      = _copy_obj(src.font)
+            dst.border    = _copy_obj(src.border)
+            dst.alignment = _copy_obj(src.alignment)
+        except Exception:
+            pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Point d'entrée principal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,12 +78,14 @@ def update_excel(template_path: str, output_path: str, data_dict: dict) -> dict:
     # Lecture des valeurs Jan-Sep depuis le template original
     jan_sep = _read_template_jan_sep(template_path)
 
-    wb     = openpyxl.load_workbook(output_path)
-    totals = {}
+    wb          = openpyxl.load_workbook(output_path)
+    totals      = {}
+    ytd_totals  = {}
 
     for sheet_name, dept_key in DEPT_SHEETS.items():
         if sheet_name not in wb.sheetnames:
-            totals[dept_key] = 0
+            totals[dept_key]     = 0
+            ytd_totals[dept_key] = 0
             continue
 
         ws        = wb[sheet_name]
@@ -86,17 +105,33 @@ def update_excel(template_path: str, output_path: str, data_dict: dict) -> dict:
         dept_oct = _write_dept_data(ws, dept_data, tmpl_vals, total_row)
         totals[dept_key] = dept_oct
 
+        # ── YTD réel : Jan-Sep template TOTAL + Oct ───────────────────────────
+        total_js = next(
+            (v for k, v in tmpl_vals.items() if k.upper().startswith("TOTAL")), {}
+        )
+        jan_sep_sum          = sum(total_js.values())
+        ytd_totals[dept_key] = jan_sep_sum + dept_oct
+
+        # ── Copier le style col L (Oct) → col M (YTD) ─────────────────────────
+        _copy_col_style(ws, OCT_COL, YTD_COL, 2, total_row)
+
         # ── Zone d'import automatique ─────────────────────────────────────────
         _write_import_zone(ws, dept_data, total_row)
 
-    totals["TOTAL"] = sum(v for k, v in totals.items() if k != "TOTAL")
+    totals["TOTAL"]     = sum(v for k, v in totals.items()     if k != "TOTAL")
+    ytd_totals["TOTAL"] = sum(v for k, v in ytd_totals.items() if k != "TOTAL")
 
     _update_synthese(wb, jan_sep, totals)
     _update_controls_sheet(wb, totals)
 
     wb.save(output_path)
     wb.close()
-    return totals
+
+    # Retourner oct + ytd dans un seul dict (ytd_ prefix pour ne pas casser l'API)
+    result = dict(totals)
+    for k, v in ytd_totals.items():
+        result[f"ytd_{k}"] = v
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -236,14 +271,14 @@ def _write_import_zone(ws, dept_data: dict, main_total_row: int) -> None:
     if header_row is None:
         return
 
-    # Oct en col M (13) de la zone d'import — CTRL est en col L (12)
-    _safe_write(ws, header_row, 13, OCT_HEADER)
+    # Oct en col L (12) — cohérent avec la zone principale (écrase CTRL)
+    _safe_write(ws, header_row, OCT_COL, OCT_HEADER)
 
     data_start = header_row + 1
     for i, (poste, val) in enumerate(dept_data.items()):
         r = data_start + i
         _safe_write(ws, r, 1, poste)
-        _safe_write(ws, r, 13, float(val), "#,##0")
+        _safe_write(ws, r, OCT_COL, float(val), "#,##0")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -321,6 +356,9 @@ def _update_synthese(wb, jan_sep: dict, oct_totals: dict) -> None:
         _safe_write(synthese_ws, synth_row, PCT_COL, pct, "0.0%")
 
     _safe_write(synthese_ws, total_synth_row, PCT_COL, 1.0, "0.0%")
+
+    # ── Copier le style col L (Oct) → col M (YTD) ─────────────────────────────
+    _copy_col_style(synthese_ws, OCT_COL, YTD_COL, 3, total_synth_row)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
