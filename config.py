@@ -28,7 +28,7 @@ OUTPUT_DIR     = "output/"
 
 # ── Constantes métier ─────────────────────────────────────────────────────────
 CURRENT_MONTH_LABEL = "Octobre 2024"
-CURRENT_MONTH_COL   = 13
+CURRENT_MONTH_COL   = 12   # col L = Oct (col M = Total YTD Jan-Oct)
 
 SEPT_2024_TOTALS = {
     "RH": 965,
