@@ -23,13 +23,23 @@ from core.pdf_generator import generate_pdf
 from core.emailer import send_report_email
 
 # ── Secrets Streamlit Cloud (re-lu à chaque exécution du script) ─────────────
-# Les modules Python sont mis en cache — les variables de config.py ne sont
-# évaluées qu'une fois au premier import. On force la mise à jour ici, là où
-# st.secrets est garanti disponible.
 _SECRET_KEYS = ["ANTHROPIC_API_KEY", "SENDER_EMAIL", "OUTLOOK_PASSWORD", "RECIPIENT_EMAIL"]
 for _k in _SECRET_KEYS:
     if not getattr(config, _k, "") and _k in st.secrets:
         setattr(config, _k, st.secrets[_k])
+
+# ── Session state — persiste les résultats entre reruns (boutons téléchargement)
+_SS_DEFAULTS = {
+    "pipeline_done": False,
+    "excel_path": None,
+    "pdf_path": None,
+    "synthese_data": {},
+    "commentary_text": "",
+    "log_lines": [],
+}
+for _k, _v in _SS_DEFAULTS.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
 
 # ── CSS personnalisé ──────────────────────────────────────────────────────────
 st.markdown("""
@@ -162,7 +172,7 @@ st.markdown("---")
 # ── Bouton de lancement ───────────────────────────────────────────────────────
 launch = st.button("▶  LANCER LA CONSOLIDATION", type="primary")
 
-if not launch:
+if not launch and not st.session_state.pipeline_done:
     st.markdown(
         "<p style='text-align:center; color:#8A9AB5; font-size:13px;'>"
         "Chargez les fichiers puis cliquez sur le bouton pour démarrer.</p>",
@@ -172,150 +182,169 @@ if not launch:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PIPELINE DE CONSOLIDATION
+# PIPELINE DE CONSOLIDATION (exécuté uniquement au clic du bouton)
 # ═════════════════════════════════════════════════════════════════════════════
 
-st.markdown("### Journal d'exécution")
-log_container = st.empty()
-log_lines: list[str] = []
+if launch:
+    # Réinitialiser l'état pour un nouveau run
+    st.session_state.pipeline_done = False
+    st.session_state.excel_path = None
+    st.session_state.pdf_path = None
 
-Path(config.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-_email_warning = None
+    st.markdown("### Journal d'exécution")
+    log_container = st.empty()
+    log_lines: list[str] = []
 
-try:
-    # ── STEP 1 : Lecture CSV Sage ─────────────────────────────────────────────
-    _add_log(log_container, log_lines, "⏳ Lecture du CSV Sage...", 0.4)
+    Path(config.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if use_sample:
-        sage_path = "data/sample_sage.csv"
-    else:
-        tmp_sage = Path(config.OUTPUT_DIR) / f"sage_upload_{timestamp}.csv"
-        tmp_sage.write_bytes(sage_file.read())
-        sage_path = str(tmp_sage)
+    try:
+        # ── STEP 1 : Lecture CSV Sage ─────────────────────────────────────────
+        _add_log(log_container, log_lines, "⏳ Lecture du CSV Sage...", 0.4)
 
-    data_dict = parse_sage_csv(sage_path)
-    n_lignes = sum(len(v) for v in data_dict.values())
-    _add_log(log_container, log_lines,
-             f"✅ CSV Sage chargé — {n_lignes} lignes, 4 départements détectés")
-
-    # ── STEP 2 : Données ADP (optionnel) ──────────────────────────────────────
-    if use_sample_adp or adp_file is not None:
-        _add_log(log_container, log_lines, "⏳ Lecture données ADP...", 0.3)
-        if use_sample_adp:
-            adp_path = "data/sample_adp.csv"
+        if use_sample:
+            sage_path = "data/sample_sage.csv"
         else:
-            tmp_adp = Path(config.OUTPUT_DIR) / f"adp_upload_{timestamp}.csv"
-            tmp_adp.write_bytes(adp_file.read())
-            adp_path = str(tmp_adp)
+            tmp_sage = Path(config.OUTPUT_DIR) / f"sage_upload_{timestamp}.csv"
+            tmp_sage.write_bytes(sage_file.read())
+            sage_path = str(tmp_sage)
 
-        adp_data = parse_adp_csv(adp_path)
-        if adp_data:
-            data_dict["RH"].update(adp_data)
-            _add_log(log_container, log_lines,
-                     f"✅ Données ADP fusionnées — {len(adp_data)} poste(s) mis à jour")
-
-    # ── STEP 3 : Mise à jour Excel ────────────────────────────────────────────
-    _add_log(log_container, log_lines, "⏳ Mise à jour du fichier Excel...", 0.6)
-    output_excel = str(Path(config.OUTPUT_DIR) / f"consolidation_oct2024_{timestamp}.xlsx")
-    synthese_data = update_excel(config.TEMPLATE_EXCEL, output_excel, data_dict)
-    _add_log(log_container, log_lines,
-             f"✅ Excel mis à jour — colonnes Octobre 2024 écrites → {Path(output_excel).name}")
-
-    # ── STEP 4 : Contrôles ────────────────────────────────────────────────────
-    _add_log(log_container, log_lines, "⏳ Vérification des contrôles...", 0.5)
-    is_valid, ctrl_status = check_controls(output_excel)
-
-    dept_icons = " | ".join(
-        f"{dept} {'✅' if 'OK' in str(v).upper() or 'VALID' in str(v).upper() else '⚠️'}"
-        for dept, v in ctrl_status.get("lignes", {}).items()
-    ) or "RH ✅ | Tech ✅ | S&M ✅ | G&A ✅"
-
-    _add_log(log_container, log_lines,
-             f"✅ Contrôles : {dept_icons}")
-
-    global_icon = "✅" if is_valid else "⚠️"
-    global_label = ctrl_status.get("global", "FICHIER VALIDÉ")
-    _add_log(log_container, log_lines,
-             f"{global_icon} Statut global : {global_label} (écart = 0 k€)")
-
-    # ── STEP 5 : Commentaire Claude ───────────────────────────────────────────
-    _add_log(log_container, log_lines, "⏳ Génération du commentaire de gestion (Claude)...", 0.3)
-
-    if not config.ANTHROPIC_API_KEY:
-        commentary_text = (
-            "Octobre 2024 : charges totales à 1 414 k€, en baisse de -1,9% vs septembre (1 442 k€). "
-            "La masse salariale RH reste le poste dominant à 965 k€ (+0,0%), stable. "
-            "Tech affiche une légère hausse à 217 k€ (+2,8%) tirée par les licences LLM/API. "
-            "S&M recule à 131 k€ (-14,4%) grâce à la réduction des dépenses événementielles one-off. "
-            "G&A stable à 101 k€ (-5,6%). Aucun écart entre Synthèse et sources — fichier validé."
-        )
+        data_dict = parse_sage_csv(sage_path)
+        n_lignes = sum(len(v) for v in data_dict.values())
         _add_log(log_container, log_lines,
-                 "⚠️  ANTHROPIC_API_KEY non configurée — commentaire de démonstration utilisé")
-    else:
-        chunks = []
-        for chunk in stream_commentary(
-            data_dict, synthese_data, api_key=config.ANTHROPIC_API_KEY
-        ):
-            chunks.append(chunk)
-        commentary_text = "".join(chunks)
+                 f"✅ CSV Sage chargé — {n_lignes} lignes, 4 départements détectés")
 
-    _add_log(log_container, log_lines, "✅ Commentaire de gestion généré")
+        # ── STEP 2 : Données ADP (optionnel) ──────────────────────────────────
+        if use_sample_adp or adp_file is not None:
+            _add_log(log_container, log_lines, "⏳ Lecture données ADP...", 0.3)
+            if use_sample_adp:
+                adp_path = "data/sample_adp.csv"
+            else:
+                tmp_adp = Path(config.OUTPUT_DIR) / f"adp_upload_{timestamp}.csv"
+                tmp_adp.write_bytes(adp_file.read())
+                adp_path = str(tmp_adp)
 
-    # ── STEP 6 : Génération PDF ───────────────────────────────────────────────
-    _add_log(log_container, log_lines, "⏳ Génération du rapport PDF...", 0.5)
-    output_pdf = str(Path(config.OUTPUT_DIR) / f"rapport_octobre_2024_{timestamp}.pdf")
-    generate_pdf(output_pdf, synthese_data, commentary_text)
-    _add_log(log_container, log_lines,
-             f"✅ PDF généré : {Path(output_pdf).name}")
-
-    # ── STEP 7 : Envoi email (optionnel — non-fatal) ─────────────────────────
-    if send_email and recipient_override:
-        _add_log(log_container, log_lines,
-                 f"⏳ Envoi email à {recipient_override}...", 0.4)
-        if not config.SENDER_EMAIL or not config.OUTLOOK_PASSWORD:
-            _add_log(log_container, log_lines,
-                     "⚠️  Credentials Outlook non configurés — envoi email ignoré")
-        else:
-            try:
-                send_report_email(
-                    pdf_path=output_pdf,
-                    recipient_email=recipient_override,
-                    month_label=config.CURRENT_MONTH_LABEL,
-                    commentary_text=commentary_text,
-                    sender_email=config.SENDER_EMAIL,
-                    outlook_password=config.OUTLOOK_PASSWORD,
-                    synthese_data=synthese_data,
-                )
+            adp_data = parse_adp_csv(adp_path)
+            if adp_data:
+                data_dict["RH"].update(adp_data)
                 _add_log(log_container, log_lines,
-                         f"✅ Email envoyé à {recipient_override}")
-            except Exception as email_exc:
-                err_str = str(email_exc)
-                if "SmtpClientAuthentication is disabled" in err_str or "535" in err_str:
-                    _add_log(log_container, log_lines,
-                             "⚠️  Email non envoyé : SMTP AUTH désactivé par l'admin du tenant")
-                    _add_log(log_container, log_lines,
-                             "    → Le rapport PDF est disponible en téléchargement ci-dessous", 0)
-                else:
-                    _add_log(log_container, log_lines,
-                             f"⚠️  Email non envoyé : {err_str[:80]}", 0)
-                _email_warning = err_str
+                         f"✅ Données ADP fusionnées — {len(adp_data)} poste(s) mis à jour")
 
-    _add_log(log_container, log_lines,
-             "\n══════════════════════════════════════", 0)
-    _add_log(log_container, log_lines,
-             "✅  CONSOLIDATION TERMINÉE — Durée < 2 min", 0)
+        # ── STEP 3 : Mise à jour Excel ────────────────────────────────────────
+        _add_log(log_container, log_lines, "⏳ Mise à jour du fichier Excel...", 0.6)
+        output_excel = str(Path(config.OUTPUT_DIR) / f"consolidation_oct2024_{timestamp}.xlsx")
+        synthese_data = update_excel(config.TEMPLATE_EXCEL, output_excel, data_dict)
+        _add_log(log_container, log_lines,
+                 f"✅ Excel mis à jour — colonnes Octobre 2024 écrites → {Path(output_excel).name}")
+
+        # ── STEP 4 : Contrôles ────────────────────────────────────────────────
+        _add_log(log_container, log_lines, "⏳ Vérification des contrôles...", 0.5)
+        is_valid, ctrl_status = check_controls(output_excel)
+
+        dept_icons = " | ".join(
+            f"{dept} {'✅' if 'OK' in str(v).upper() or 'VALID' in str(v).upper() else '⚠️'}"
+            for dept, v in ctrl_status.get("lignes", {}).items()
+        ) or "RH ✅ | Tech ✅ | S&M ✅ | G&A ✅"
+
+        _add_log(log_container, log_lines, f"✅ Contrôles : {dept_icons}")
+
+        global_icon = "✅" if is_valid else "⚠️"
+        global_label = ctrl_status.get("global", "FICHIER VALIDÉ")
+        _add_log(log_container, log_lines,
+                 f"{global_icon} Statut global : {global_label} (écart = 0 k€)")
+
+        # ── STEP 5 : Commentaire Claude ───────────────────────────────────────
+        _add_log(log_container, log_lines,
+                 "⏳ Génération du commentaire de gestion (Claude)...", 0.3)
+
+        if not config.ANTHROPIC_API_KEY:
+            commentary_text = (
+                "Octobre 2024 : charges totales à 1 414 k€, en baisse de -1,9% vs septembre (1 442 k€). "
+                "La masse salariale RH reste le poste dominant à 965 k€ (+0,0%), stable. "
+                "Tech affiche une légère hausse à 217 k€ (+2,8%) tirée par les licences LLM/API. "
+                "S&M recule à 131 k€ (-14,4%) grâce à la réduction des dépenses événementielles one-off. "
+                "G&A stable à 101 k€ (-5,6%). Aucun écart entre Synthèse et sources — fichier validé."
+            )
+            _add_log(log_container, log_lines,
+                     "⚠️  ANTHROPIC_API_KEY non configurée — commentaire de démonstration utilisé")
+        else:
+            chunks = []
+            for chunk in stream_commentary(
+                data_dict, synthese_data, api_key=config.ANTHROPIC_API_KEY
+            ):
+                chunks.append(chunk)
+            commentary_text = "".join(chunks)
+
+        _add_log(log_container, log_lines, "✅ Commentaire de gestion généré")
+
+        # ── STEP 6 : Génération PDF ───────────────────────────────────────────
+        _add_log(log_container, log_lines, "⏳ Génération du rapport PDF...", 0.5)
+        output_pdf = str(Path(config.OUTPUT_DIR) / f"rapport_octobre_2024_{timestamp}.pdf")
+        generate_pdf(output_pdf, synthese_data, commentary_text)
+        _add_log(log_container, log_lines, f"✅ PDF généré : {Path(output_pdf).name}")
+
+        # ── STEP 7 : Envoi email (optionnel — non-fatal) ─────────────────────
+        if send_email and recipient_override:
+            _add_log(log_container, log_lines,
+                     f"⏳ Envoi email à {recipient_override}...", 0.4)
+            if not config.SENDER_EMAIL or not config.OUTLOOK_PASSWORD:
+                _add_log(log_container, log_lines,
+                         "⚠️  Credentials Outlook non configurés — envoi email ignoré")
+            else:
+                try:
+                    send_report_email(
+                        pdf_path=output_pdf,
+                        recipient_email=recipient_override,
+                        month_label=config.CURRENT_MONTH_LABEL,
+                        commentary_text=commentary_text,
+                        sender_email=config.SENDER_EMAIL,
+                        outlook_password=config.OUTLOOK_PASSWORD,
+                        synthese_data=synthese_data,
+                    )
+                    _add_log(log_container, log_lines,
+                             f"✅ Email envoyé à {recipient_override}")
+                except Exception as email_exc:
+                    err_str = str(email_exc)
+                    if "SmtpClientAuthentication is disabled" in err_str or "535" in err_str:
+                        _add_log(log_container, log_lines,
+                                 "⚠️  Email non envoyé : SMTP AUTH désactivé par l'admin du tenant")
+                        _add_log(log_container, log_lines,
+                                 "    → Le rapport PDF est disponible en téléchargement ci-dessous", 0)
+                    else:
+                        _add_log(log_container, log_lines,
+                                 f"⚠️  Email non envoyé : {err_str[:80]}", 0)
+
+        _add_log(log_container, log_lines,
+                 "\n══════════════════════════════════════", 0)
+        _add_log(log_container, log_lines,
+                 "✅  CONSOLIDATION TERMINÉE — Durée < 2 min", 0)
+
+        # ── Stocker les résultats pour survivre au rerun des boutons DL ──────
+        st.session_state.pipeline_done = True
+        st.session_state.excel_path = output_excel
+        st.session_state.pdf_path = output_pdf
+        st.session_state.synthese_data = synthese_data
+        st.session_state.commentary_text = commentary_text
+
+    except Exception as exc:
+        _add_log(log_container, log_lines, f"❌ ERREUR : {exc}", 0)
+        st.error(f"La consolidation a échoué à cette étape : **{exc}**")
+        st.stop()
 
 
-except Exception as exc:
-    _add_log(log_container, log_lines, f"❌ ERREUR : {exc}", 0)
-    st.error(f"La consolidation a échoué à cette étape : **{exc}**")
+# ═════════════════════════════════════════════════════════════════════════════
+# RÉSULTATS — affichés depuis session_state (survivent aux reruns DL)
+# ═════════════════════════════════════════════════════════════════════════════
+
+if not st.session_state.pipeline_done:
     st.stop()
 
+import pandas as pd
 
-# ═════════════════════════════════════════════════════════════════════════════
-# RÉSULTATS
-# ═════════════════════════════════════════════════════════════════════════════
+output_excel   = st.session_state.excel_path
+output_pdf     = st.session_state.pdf_path
+synthese_data  = st.session_state.synthese_data
+commentary_text = st.session_state.commentary_text
 
 st.markdown("---")
 st.markdown("### Résultats")
@@ -327,20 +356,17 @@ tab_synthese, tab_commentaire, tab_telechargements = st.tabs(
 # ── Tableau synthèse ──────────────────────────────────────────────────────────
 with tab_synthese:
     prev = config.SEPT_2024_TOTALS
-
-    import pandas as pd
-
     rows = []
     for dept in ["RH", "Tech", "S&M", "G&A", "TOTAL"]:
         curr = synthese_data.get(dept, 0)
-        prv = prev.get(dept, 0)
+        prv  = prev.get(dept, 0)
         var_pct = (curr - prv) / prv * 100 if prv else 0
         sign = "+" if var_pct >= 0 else ""
         rows.append({
-            "Département": dept,
+            "Département":   dept,
             "Oct 2024 (k€)": f"{curr:,.0f}",
             "Sep 2024 (k€)": f"{prv:,.0f}",
-            "Var. M/M": f"{sign}{var_pct:.1f}%",
+            "Var. M/M":      f"{sign}{var_pct:.1f}%",
         })
 
     df = pd.DataFrame(rows)
@@ -355,8 +381,10 @@ with tab_synthese:
     styled = (
         df.style
         .map(_color_var, subset=["Var. M/M"])
-        .set_properties(**{"text-align": "right"}, subset=["Oct 2024 (k€)", "Sep 2024 (k€)", "Var. M/M"])
-        .set_properties(**{"font-weight": "bold", "background-color": "#e8edf4"}, subset=pd.IndexSlice[df.index[-1], :])
+        .set_properties(**{"text-align": "right"},
+                        subset=["Oct 2024 (k€)", "Sep 2024 (k€)", "Var. M/M"])
+        .set_properties(**{"font-weight": "bold", "background-color": "#e8edf4"},
+                        subset=pd.IndexSlice[df.index[-1], :])
     )
     st.dataframe(styled, use_container_width=True, hide_index=True)
 
@@ -377,23 +405,25 @@ with tab_telechargements:
     col_dl1, col_dl2 = st.columns(2)
 
     with col_dl1:
-        with open(output_excel, "rb") as f:
+        with open(output_excel, "rb") as fxl:
             st.download_button(
                 label="⬇️  Télécharger Excel consolidé",
-                data=f.read(),
+                data=fxl.read(),
                 file_name=Path(output_excel).name,
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
+                key="dl_excel",
             )
 
     with col_dl2:
-        with open(output_pdf, "rb") as f:
+        with open(output_pdf, "rb") as fpdf:
             st.download_button(
                 label="⬇️  Télécharger Rapport PDF",
-                data=f.read(),
+                data=fpdf.read(),
                 file_name=Path(output_pdf).name,
                 mime="application/pdf",
                 use_container_width=True,
+                key="dl_pdf",
             )
 
     st.success(

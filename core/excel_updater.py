@@ -243,7 +243,7 @@ def _write_import_zone(ws, dept_data: dict, main_total_row: int) -> None:
     for i, (poste, val) in enumerate(dept_data.items()):
         r = data_start + i
         _safe_write(ws, r, 1, poste)
-        _safe_write(ws, r, 13, float(val))
+        _safe_write(ws, r, 13, float(val), "#,##0")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -296,8 +296,8 @@ def _update_synthese(wb, jan_sep: dict, oct_totals: dict) -> None:
         ytd_jan_sep = sum(totals_js.get(c, 0) for c in range(JAN_COL, SEP_COL + 1))
         ytd_jan_oct = ytd_jan_sep + oct_val
 
-        _safe_write(synthese_ws, synth_row, OCT_COL, oct_val)
-        _safe_write(synthese_ws, synth_row, YTD_COL, ytd_jan_oct)
+        _safe_write(synthese_ws, synth_row, OCT_COL, oct_val, "#,##0")
+        _safe_write(synthese_ws, synth_row, YTD_COL, ytd_jan_oct, "#,##0")
         # % sera calculé après avoir rempli la ligne TOTAL
 
     # ── Ligne TOTAL (row 8) ───────────────────────────────────────────────────
@@ -306,10 +306,12 @@ def _update_synthese(wb, jan_sep: dict, oct_totals: dict) -> None:
             _safe_read(synthese_ws, r, col) or 0
             for r in range(4, 8)
         )
-        _safe_write(synthese_ws, total_synth_row, col, total_val)
+        fmt = "#,##0"
+        _safe_write(synthese_ws, total_synth_row, col, total_val, fmt)
 
     _safe_write(synthese_ws, total_synth_row, OCT_COL,
-                sum(_safe_read(synthese_ws, r, OCT_COL) or 0 for r in range(4, 8)))
+                sum(_safe_read(synthese_ws, r, OCT_COL) or 0 for r in range(4, 8)),
+                "#,##0")
 
     # ── % du total (col N) ────────────────────────────────────────────────────
     ytd_global = _safe_read(synthese_ws, total_synth_row, YTD_COL) or 0
