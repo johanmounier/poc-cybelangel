@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -56,21 +57,25 @@ def generate_pdf(
     style_logo = ParagraphStyle(
         "logo",
         fontName="Helvetica-Bold",
-        fontSize=26,
+        fontSize=22,
+        leading=28,
         textColor=DARK_BLUE,
-        spaceAfter=4,
+        spaceAfter=6,
     )
     style_title = ParagraphStyle(
         "title",
         fontName="Helvetica-Bold",
-        fontSize=14,
+        fontSize=13,
+        leading=18,
         textColor=DARK_BLUE,
-        spaceAfter=2,
+        spaceBefore=2,
+        spaceAfter=4,
     )
     style_subtitle = ParagraphStyle(
         "subtitle",
         fontName="Helvetica",
         fontSize=9,
+        leading=13,
         textColor=colors.HexColor("#6B7E9B"),
         spaceAfter=12,
     )
@@ -198,8 +203,16 @@ def generate_pdf(
         rightIndent=8,
     )
 
-    # Encadré commentaire
-    commentary_escaped = commentary_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # Encadré commentaire — escape HTML puis convertit **gras** et *italique*
+    commentary_escaped = (
+        commentary_text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    # Markdown bold/italic → balises ReportLab
+    commentary_escaped = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', commentary_escaped)
+    commentary_escaped = re.sub(r'\*(.+?)\*',     r'<i>\1</i>', commentary_escaped)
     commentary_para = Paragraph(commentary_escaped.replace("\n", "<br/>"), style_commentary)
 
     comment_table = Table(
