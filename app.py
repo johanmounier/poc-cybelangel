@@ -22,6 +22,15 @@ from core.commentary import stream_commentary
 from core.pdf_generator import generate_pdf
 from core.emailer import send_report_email
 
+# ── Secrets Streamlit Cloud (re-lu à chaque exécution du script) ─────────────
+# Les modules Python sont mis en cache — les variables de config.py ne sont
+# évaluées qu'une fois au premier import. On force la mise à jour ici, là où
+# st.secrets est garanti disponible.
+_SECRET_KEYS = ["ANTHROPIC_API_KEY", "SENDER_EMAIL", "OUTLOOK_PASSWORD", "RECIPIENT_EMAIL"]
+for _k in _SECRET_KEYS:
+    if not getattr(config, _k, "") and _k in st.secrets:
+        setattr(config, _k, st.secrets[_k])
+
 # ── CSS personnalisé ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
