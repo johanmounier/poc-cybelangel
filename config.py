@@ -1,21 +1,34 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # charge .env en local ; sans effet sur Railway (env vars injectées directement)
+load_dotenv()  # local : charge .env ; Streamlit Cloud : sans effet (secrets injectés via st.secrets)
 
-# ── Credentials — lus depuis les variables d'environnement ───────────────────
-SENDER_EMAIL        = os.getenv("SENDER_EMAIL", "")
-OUTLOOK_PASSWORD    = os.getenv("OUTLOOK_PASSWORD", "")
-RECIPIENT_EMAIL     = os.getenv("RECIPIENT_EMAIL", "")
-ANTHROPIC_API_KEY   = os.getenv("ANTHROPIC_API_KEY", "")
 
-# ── Chemins ──────────────────────────────────────────────────────────────────
+def _get(key: str) -> str:
+    """Lit un secret dans l'ordre : variable d'env → st.secrets (Streamlit Cloud)."""
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key, "")
+    except Exception:
+        return ""
+
+
+# ── Credentials ───────────────────────────────────────────────────────────────
+SENDER_EMAIL        = _get("SENDER_EMAIL")
+OUTLOOK_PASSWORD    = _get("OUTLOOK_PASSWORD")
+RECIPIENT_EMAIL     = _get("RECIPIENT_EMAIL")
+ANTHROPIC_API_KEY   = _get("ANTHROPIC_API_KEY")
+
+# ── Chemins ───────────────────────────────────────────────────────────────────
 TEMPLATE_EXCEL = "data/template.xlsx"
 OUTPUT_DIR     = "output/"
 
-# ── Constantes métier ────────────────────────────────────────────────────────
+# ── Constantes métier ─────────────────────────────────────────────────────────
 CURRENT_MONTH_LABEL = "Octobre 2024"
-CURRENT_MONTH_COL   = 13          # colonne M (index openpyxl, 1-based)
+CURRENT_MONTH_COL   = 13
 
 SEPT_2024_TOTALS = {
     "RH": 965,
